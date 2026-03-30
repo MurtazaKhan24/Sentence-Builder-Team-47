@@ -7,64 +7,266 @@ Original file is located at
     https://colab.research.google.com/drive/1Twz_Xlr8r3bC6KtpIUTRG39ktbomeRg5
 """
 
-import re
-import requests
-import csv
-from collections import Counter
+"""
+Author: Murtaza Khan
+Revised Date: 3/29/2026
+This was made with the help of generative AI
+"""
 
+import re
+import csv
+import requests
+from pathlib import Path
+from collections import Counter, defaultdict
+from urllib.parse import urlparse
+from datetime import datetime
 
 
 def download_gutenberg_text(url: str) -> str:
+    """
+    Download raw plain text from a Project Gutenberg URL.
+    """
     response = requests.get(url, timeout=30)
     response.raise_for_status()
     return response.text
 
-def strip_gutenberg_boilerplate(text: str) -> str:
-    start_pattern = r"\*\*\* START OF (THE|THIS) PROJECT GUTENBERG EBOOK .* \*\*\*"
-    end_pattern = r"\*\*\* END OF (THE|THIS) PROJECT GUTENBERG EBOOK .* \*\*\*"
 
-    start_match = re.search(start_pattern, text, re.IGNORECASE)
-    end_match = re.search(end_pattern, text, re.IGNORECASE)
+def strip_gutenberg_boilerplate(text: str) -> str:
+    """
+    Remove the standard Project Gutenberg header and footer.
+    """
+    start_pattern = r"\*\*\* START OF (THE|THIS) PROJECT GUTENBERG EBOOK .*?\*\*\*"
+    end_pattern = r"\*\*\* END OF (THE|THIS) PROJECT GUTENBERG EBOOK .*?\*\*\*"
+
+    start_match = re.search(start_pattern, text, re.IGNORECASE | re.DOTALL)
+    end_match = re.search(end_pattern, text, re.IGNORECASE | re.DOTALL)
 
     if start_match:
         text = text[start_match.end():]
     if end_match:
         text = text[:end_match.start()]
 
+    return text.strip()
+
+
+def normalize_quotes_and_dashes(text: str) -> str:
+    """
+    Normalize curly quotes, apostrophes, and dashes.
+    """
+    replacements = {
+        "’": "'",
+        "‘": "'",
+        "“": '"',
+        "”": '"',
+        "—": " ",
+        "–": " ",
+        "_": " ",
+    }
+
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+
     return text
 
-def clean_words(text: str) -> list[str]:
+
+def extract_sentences(text: str) -> list[str]:
+    """
+    Convert raw text into cleaned sentence strings.
+    Keeps apostrophes inside words, removes most other punctuation.
+    """
+    text = normalize_quotes_and_dashes(text)
     text = text.lower()
-    text = text.replace("’", "'").replace("‘", "'")
-    text = re.sub(r"[^a-z0-9'\s]", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text.split()
 
-def write_bigrams(words: list[str], output_csv: str) -> None:
-    with open(output_csv, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["current_word", "next_word"])
+    # Replace line breaks with spaces first
+    text = text.replace("\r", " ").replace("\n", " ")
+
+    # Keep letters, digits, apostrophes, spaces, and sentence-ending punctuation
+    text = re.sub(r"[^a-z0-9\s.!?']", " ", text)
+
+    # Split into sentences on ., !, ?
+    raw_sentences = re.split(r"[.!?]+", text)
+
+    cleaned_sentences = []
+    for sentence in raw_sentences:
+        sentence = re.sub(r"\s+", " ", sentence).strip()
+
+        # Skip empty or tiny fragments
+        if len(sentence.split()) >= 2:
+            cleaned_sentences.append(sentence)
+
+    return cleaned_sentences
+
+
+def tokenize_sentence(sentence: str) -> list[str]:
+    """
+    Split a cleaned sentence into tokens.
+    Allows apostrophes in words like don't.
+    """
+    return re.findall(r"[a-z0-9]+(?:'[a-z0-9]+)?", sentence)
+
+
+def build_word_stats(sentences: list[str]) -> tuple[Counter, Counter, Counter]:
+    """
+    Build:
+    - total word frequency
+    - sentence start frequency
+    - sentence end frequency
+    """
+    word_freq = Counter()
+    start_freq = Counter()
+    end_freq = Counter()
+
+    for sentence in sentences:
+        words = tokenize_sentence(sentence)
+        if not words:
+            continue
+
+        word_freq.update(words)
+        start_freq[words[0]] += 1
+        end_freq[words[-1]] += 1
+
+    return word_freq, start_freq, end_freq
+
+
+def build_bigram_frequencies(sentences: list[str]) -> defaultdict[tuple[str, str], int]:
+    """
+    Count each (current_word, next_word) bigram frequency.
+    """
+    bigram_freq = defaultdict(int)
+
+    for sentence in sentences:
+        words = tokenize_sentence(sentence)
+        if len(words) < 2:
+            continue
+
         for i in range(len(words) - 1):
-            writer.writerow([words[i], words[i + 1]])
+            pair = (words[i], words[i + 1])
+            bigram_freq[pair] += 1
 
-def build_unigram_frequencies(words):
-    return Counter(words)
+    return bigram_freq
 
-def save_unigrams(freq, filename):
-    with open(filename, "w", newline="", encoding="utf-8") as f:
+
+def save_word_stats(
+    word_freq: Counter,
+    start_freq: Counter,
+    end_freq: Counter,
+    output_path: Path
+) -> None:
+    """
+    Save word statistics as CSV.
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with output_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["word", "frequency"])
+        writer.writerow(["word", "frequency", "start_count", "end_count"])
 
-        for word, count in freq.most_common():
-            writer.writerow([word, count])
+        for word in sorted(word_freq):
+            writer.writerow([
+                word,
+                word_freq[word],
+                start_freq[word],
+                end_freq[word]
+            ])
 
-def main():
-    url = "https://www.gutenberg.org/files/84/84-0.txt"  # Frankenstein
-    raw = download_gutenberg_text(url)
-    stripped = strip_gutenberg_boilerplate(raw)
-    words = clean_words(stripped)
-    write_bigrams(words, "bigrams.csv")
-    print("Saved bigrams.csv")
+
+def save_bigram_frequencies(
+    bigram_freq: defaultdict[tuple[str, str], int],
+    output_path: Path
+) -> None:
+    """
+    Save bigram frequencies as CSV.
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with output_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["current_word", "next_word", "frequency"])
+
+        sorted_rows = sorted(
+            bigram_freq.items(),
+            key=lambda item: (-item[1], item[0][0], item[0][1])
+        )
+
+        for (current_word, next_word), frequency in sorted_rows:
+            writer.writerow([current_word, next_word, frequency])
+
+
+def save_import_metadata(
+    source_url: str,
+    original_text: str,
+    cleaned_sentences: list[str],
+    output_path: Path
+) -> None:
+    """
+    Save basic imported file metadata.
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    parsed = urlparse(source_url)
+    filename = Path(parsed.path).name or "unknown_source.txt"
+
+    all_words = []
+    for sentence in cleaned_sentences:
+        all_words.extend(tokenize_sentence(sentence))
+
+    imported_at = datetime.now().isoformat(timespec="seconds")
+
+    with output_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "filename",
+            "source_url",
+            "raw_character_count",
+            "cleaned_sentence_count",
+            "cleaned_word_count",
+            "imported_at"
+        ])
+        writer.writerow([
+            filename,
+            source_url,
+            len(original_text),
+            len(cleaned_sentences),
+            len(all_words),
+            imported_at
+        ])
+
+
+def main() -> None:
+    # Example: Pride and Prejudice plain-text version
+    url = "https://www.gutenberg.org/files/1342/1342-0.txt"
+
+    base_output_dir = Path("../data")
+    word_stats_file = base_output_dir / "word_stats.csv"
+    bigrams_file = base_output_dir / "bigram_frequencies.csv"
+    import_metadata_file = base_output_dir / "imported_files.csv"
+
+    print("Downloading text...")
+    raw_text = download_gutenberg_text(url)
+
+    print("Removing Gutenberg header/footer...")
+    stripped_text = strip_gutenberg_boilerplate(raw_text)
+
+    print("Extracting sentences...")
+    sentences = extract_sentences(stripped_text)
+
+    print("Building word statistics...")
+    word_freq, start_freq, end_freq = build_word_stats(sentences)
+
+    print("Building bigram frequencies...")
+    bigram_freq = build_bigram_frequencies(sentences)
+
+    print("Saving CSV files...")
+    save_word_stats(word_freq, start_freq, end_freq, word_stats_file)
+    save_bigram_frequencies(bigram_freq, bigrams_file)
+    save_import_metadata(url, raw_text, sentences, import_metadata_file)
+
+    print("Done.")
+    print(f"Saved word stats to: {word_stats_file}")
+    print(f"Saved bigram frequencies to: {bigrams_file}")
+    print(f"Saved import metadata to: {import_metadata_file}")
+
 
 if __name__ == "__main__":
     main()
+    
