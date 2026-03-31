@@ -1,10 +1,15 @@
 /******************************************************************************
  * ImportService.java
  *
- * Written by James for CS4485, Senior Design Project, starting Mar 2026.
+ * Author: Murtaza Khan
+ * Revised by: James Human (converted from Python to Java)
+ * Revised Date: 3/30/2026
+ * Course: CS4485, Senior Design Project
+ * This was made with the help of generative AI (Claude Code)
  *
  * Orchestrates the import pipeline: parse a text file, then store words,
  * transitions, and file metadata in the database via the DAO layer.
+ * Based on gutenberg_script.py by Murtaza Khan.
  ******************************************************************************/
 package sentencebuilder.parser;
 

@@ -1,7 +1,10 @@
 /******************************************************************************
  * SentenceGenerator.java
  *
- * Written by James for CS4485, Senior Design Project, starting Mar 2026.
+ * Author: James Human
+ * Revised Date: 3/30/2026
+ * Course: CS4485, Senior Design Project
+ * This was made with the help of generative AI (Claude Code)
  *
  * Generates sentences using word transition data from the database.
  * Supports two algorithms: WEIGHTED_RANDOM and MOST_FREQUENT.
