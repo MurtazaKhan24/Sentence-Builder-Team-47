@@ -1,7 +1,11 @@
 /******************************************************************************
  * SentenceDao.java
  *
- * Written by James for CS4485, Senior Design Project, starting Mar 2026.
+ * Author: Pranava (schema design)
+ * Revised by: James Human (DAO implementation)
+ * Revised Date: 3/30/2026
+ * Course: CS4485, Senior Design Project
+ * This was made with the help of generative AI (Claude Code)
  *
  * Data access object for the 'generated_sentences' table. Stores sentences
  * produced by the generation algorithms and provides query methods for the

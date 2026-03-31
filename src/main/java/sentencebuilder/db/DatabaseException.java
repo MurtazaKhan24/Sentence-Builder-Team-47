@@ -1,7 +1,10 @@
 /******************************************************************************
  * DatabaseException.java
  *
- * Written by James for CS4485, Senior Design Project, starting Mar 2026.
+ * Author: James Human
+ * Revised Date: 3/30/2026
+ * Course: CS4485, Senior Design Project
+ * This was made with the help of generative AI (Claude Code)
  *
  * Unchecked exception wrapping SQLException. Allows the service layer to
  * handle database errors without being forced to catch checked exceptions.
