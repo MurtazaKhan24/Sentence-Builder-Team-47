@@ -1,3 +1,11 @@
+/******************************************************************************
+ * FileDaoTest.java
+ *
+ * Written by James for CS4485, Senior Design Project, starting Mar 2026.
+ *
+ * Tests for FileDao. Requires MySQL running locally with the
+ * sentence_builder database created.
+ ******************************************************************************/
 package sentencebuilder.db;
 
 import org.junit.jupiter.api.*;

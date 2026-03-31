@@ -1,3 +1,11 @@
+/******************************************************************************
+ * OccurrenceDaoTest.java
+ *
+ * Written by James for CS4485, Senior Design Project, starting Mar 2026.
+ *
+ * Tests for OccurrenceDao. Requires MySQL running locally with the
+ * sentence_builder database created.
+ ******************************************************************************/
 package sentencebuilder.db;
 
 import org.junit.jupiter.api.*;
