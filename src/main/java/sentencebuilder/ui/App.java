@@ -1,7 +1,7 @@
 /******************************************************************************
  * App.java
  *
- * Author: Zohaib
+ * Author: Zohaib Saqib
  * Revised by: James Human (JavaFX implementation)
  * Revised Date: 3/30/2026
  * Course: CS4485, Senior Design Project
@@ -55,6 +55,8 @@ public class App extends Application {
 
         TabPane tabPane = new TabPane();
         tabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        tabPane.setTabMinWidth(150);
+        tabPane.setTabMaxWidth(300);
 
         tabPane.getTabs().addAll(
             createImportTab(primaryStage),
@@ -64,6 +66,22 @@ public class App extends Application {
         );
 
         Scene scene = new Scene(tabPane, 800, 600);
+        scene.getRoot().setStyle(
+            "-fx-base: #F5D5DC; "
+            + "-fx-background: #FDF2F4; "
+            + "-fx-control-inner-background: #FFFAFB; "
+            + "-fx-accent: #E8A0B4; "
+            + "-fx-focus-color: #D4839B; "
+            + "-fx-faint-focus-color: #D4839B22;"
+        );
+
+        // Make tabs stretch to fill the full width
+        tabPane.tabMinWidthProperty().bind(
+            tabPane.widthProperty().divide(tabPane.getTabs().size()).subtract(20));
+
+        tabPane.setStyle("-fx-tab-min-height: 30; "
+            + "-fx-base: #F5D5DC; "
+            + "-fx-background: #FDF2F4;");
         primaryStage.setTitle("Sentence Builder - Team 47");
         primaryStage.setScene(scene);
         primaryStage.show();
@@ -71,18 +89,38 @@ public class App extends Application {
 
     private Tab createImportTab(Stage stage) {
         Tab tab = new Tab("File Importer");
-        VBox layout = new VBox(15);
-        layout.setPadding(new Insets(20));
-        layout.setAlignment(Pos.TOP_CENTER);
+        VBox layout = new VBox(10);
+        layout.setPadding(new Insets(10));
 
         Label title = new Label("Sentence Builder: File Importer");
         title.setStyle("-fx-font-size: 18; -fx-font-weight: bold;");
 
+        // Import controls row
+        HBox importRow = new HBox(10);
+        importRow.setAlignment(Pos.CENTER_LEFT);
         Label fileLabel = new Label("No file selected");
         Button selectButton = new Button("Select Text File (.txt)");
         ProgressBar progressBar = new ProgressBar(0);
-        progressBar.setPrefWidth(400);
+        progressBar.setPrefWidth(200);
         Label statusLabel = new Label("Ready");
+        importRow.getChildren().addAll(selectButton, fileLabel, progressBar, statusLabel);
+
+        // Previously imported files table
+        Label historyLabel = new Label("Imported Files");
+        historyLabel.setStyle("-fx-font-weight: bold;");
+        TableView<ImportedFile> fileTable = new TableView<>();
+        fileTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        TableColumn<ImportedFile, String> nameCol = new TableColumn<>("Filename");
+        nameCol.setCellValueFactory(new PropertyValueFactory<>("filename"));
+        TableColumn<ImportedFile, String> pathCol = new TableColumn<>("Path");
+        pathCol.setCellValueFactory(new PropertyValueFactory<>("filepath"));
+        TableColumn<ImportedFile, Integer> wcCol = new TableColumn<>("Word Count");
+        wcCol.setCellValueFactory(new PropertyValueFactory<>("wordCount"));
+        fileTable.getColumns().addAll(nameCol, pathCol, wcCol);
+        VBox.setVgrow(fileTable, javafx.scene.layout.Priority.ALWAYS);
+
+        // Load existing files on tab creation
+        fileTable.getItems().addAll(fileDao.findAll());
 
         selectButton.setOnAction(event -> {
             FileChooser fileChooser = new FileChooser();
@@ -94,9 +132,8 @@ public class App extends Application {
             if (selectedFile != null) {
                 fileLabel.setText(selectedFile.getName());
                 statusLabel.setText("Importing...");
-                progressBar.setProgress(-1); // Indeterminate
+                progressBar.setProgress(-1);
 
-                // Run import in background thread so UI doesn't freeze
                 new Thread(() -> {
                     try {
                         int wordCount = importService.importFile(selectedFile);
@@ -105,8 +142,11 @@ public class App extends Application {
                             if (wordCount == -1) {
                                 statusLabel.setText("File already imported!");
                             } else {
-                                statusLabel.setText("Done! Imported " + wordCount + " unique words.");
+                                statusLabel.setText("Done! " + wordCount + " unique words.");
                             }
+                            // Refresh file list
+                            fileTable.getItems().clear();
+                            fileTable.getItems().addAll(fileDao.findAll());
                         });
                     } catch (Exception importException) {
                         javafx.application.Platform.runLater(() -> {
@@ -118,8 +158,7 @@ public class App extends Application {
             }
         });
 
-        layout.getChildren().addAll(title, selectButton, fileLabel,
-            new Label("Import Progress"), progressBar, statusLabel);
+        layout.getChildren().addAll(title, importRow, historyLabel, fileTable);
         tab.setContent(layout);
         return tab;
     }
@@ -179,7 +218,7 @@ public class App extends Application {
 
         Label resultLabel = new Label("[Generated sentence will appear here]");
         resultLabel.setWrapText(true);
-        resultLabel.setStyle("-fx-text-fill: green; -fx-font-size: 14;");
+        resultLabel.setStyle("-fx-text-fill: #C71585; -fx-font-size: 14;");
 
         generateButton.setOnAction(event -> {
             String seed = seedField.getText().trim();
@@ -216,6 +255,7 @@ public class App extends Application {
         // Word Statistics tab
         Tab wordStatsTab = new Tab("Word Statistics");
         TableView<Word> wordTable = new TableView<>();
+        wordTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
         TableColumn<Word, String> wordCol = new TableColumn<>("Word");
         wordCol.setCellValueFactory(new PropertyValueFactory<>("word"));
         TableColumn<Word, Integer> freqCol = new TableColumn<>("Frequency");
@@ -239,9 +279,9 @@ public class App extends Application {
         // Generation History tab
         Tab historyTab = new Tab("Generation History");
         TableView<GeneratedSentence> historyTable = new TableView<>();
+        historyTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
         TableColumn<GeneratedSentence, String> sentenceCol = new TableColumn<>("Sentence");
         sentenceCol.setCellValueFactory(new PropertyValueFactory<>("sentenceText"));
-        sentenceCol.setPrefWidth(400);
         TableColumn<GeneratedSentence, String> algoCol = new TableColumn<>("Algorithm");
         algoCol.setCellValueFactory(new PropertyValueFactory<>("algorithm"));
         TableColumn<GeneratedSentence, Integer> wcCol = new TableColumn<>("Words");
@@ -298,7 +338,7 @@ public class App extends Application {
         TextField endsField = new TextField();
         endsField.setPromptText("Sentence Ends");
         Button saveButton = new Button("Save Changes");
-        saveButton.setStyle("-fx-background-color: #2d7d46; -fx-text-fill: white;");
+        saveButton.setStyle("-fx-background-color: #D4839B; -fx-text-fill: white;");
         Label statusLabel = new Label("");
 
         // When a word is selected, populate the form
