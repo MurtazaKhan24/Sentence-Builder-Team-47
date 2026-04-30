@@ -2,8 +2,8 @@
  * SentenceDao.java
  *
  * Author: Pranava (schema design)
- * Revised by: James Human (DAO implementation)
- * Revised Date: 3/30/2026
+ * Revised by: James Human (DAO implementation), Murtaza Khan (refactoring and feature additions)
+ * Revised Dates: 3/30/2026, 4/29/2026
  * Course: CS4485, Senior Design Project
  * This was made with the help of generative AI (Claude Code)
  *
@@ -14,6 +14,7 @@
 package sentencebuilder.db;
 
 import sentencebuilder.db.model.GeneratedSentence;
+import sentencebuilder.db.model.SentenceDuplicate;
 
 import java.sql.*;
 import java.util.ArrayList;
@@ -103,6 +104,34 @@ public class SentenceDao {
         } catch (SQLException sqlException) {
             throw new DatabaseException(
                 "Failed to find sentences by algorithm: " + algorithm, sqlException);
+        }
+    }
+
+    /**************************************************************************
+     * Retrieve generated sentences that appear more than once, highest count
+     * first. Used by the duplicate-sentence report view.
+     *
+     * @return list of duplicate sentence summaries
+     **************************************************************************/
+    public List<SentenceDuplicate> findDuplicates() {
+        String sql = "SELECT sentence_text, COUNT(*) AS duplicate_count "
+                   + "FROM generated_sentences "
+                   + "GROUP BY sentence_text "
+                   + "HAVING COUNT(*) > 1 "
+                   + "ORDER BY duplicate_count DESC, sentence_text ASC";
+        List<SentenceDuplicate> duplicates = new ArrayList<>();
+        try (Connection conn = dbManager.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet resultSet = stmt.executeQuery()) {
+            while (resultSet.next()) {
+                SentenceDuplicate duplicate = new SentenceDuplicate();
+                duplicate.setSentenceText(resultSet.getString("sentence_text"));
+                duplicate.setDuplicateCount(resultSet.getInt("duplicate_count"));
+                duplicates.add(duplicate);
+            }
+            return duplicates;
+        } catch (SQLException sqlException) {
+            throw new DatabaseException("Failed to retrieve duplicate sentences", sqlException);
         }
     }
 

@@ -2,8 +2,8 @@
  * App.java
  *
  * Author: Zohaib Saqib
- * Revised by: James Human (JavaFX implementation)
- * Revised Date: 3/30/2026
+ * Revised by: James Human (JavaFX implementation) and Murtaza Khan (refactoring and feature additions)
+ * Revised Dates: 3/30/2026, 4/29/2026
  * Course: CS4485, Senior Design Project
  * This was made with the help of generative AI (Claude Code)
  *
@@ -26,6 +26,7 @@ import sentencebuilder.algorithms.SentenceGenerator;
 import sentencebuilder.db.*;
 import sentencebuilder.db.model.*;
 import sentencebuilder.parser.ImportService;
+import sentencebuilder.utils.SpellChecker;
 
 import java.io.File;
 import java.util.List;
@@ -40,6 +41,7 @@ public class App extends Application {
     private SentenceDao sentenceDao;
     private SentenceGenerator generator;
     private ImportService importService;
+    private SpellChecker spellChecker;
 
     @Override
     public void start(Stage primaryStage) {
@@ -52,6 +54,7 @@ public class App extends Application {
         sentenceDao = new SentenceDao(dbManager);
         generator = new SentenceGenerator(wordDao, transitionDao);
         importService = new ImportService(wordDao, transitionDao, fileDao, occurrenceDao);
+            spellChecker = new SpellChecker(wordDao);
 
         TabPane tabPane = new TabPane();
         tabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
@@ -179,27 +182,97 @@ public class App extends Application {
         Label suggestionsLabel = new Label("Suggestions:");
         TextField suggestionsField = new TextField();
         suggestionsField.setEditable(false);
+        suggestionsField.setPrefWidth(520);
+        Button addWordButton = new Button("Add Word");
+        addWordButton.setVisible(false);
 
-        // Auto-complete: when user types a space, suggest next words
+        // Place suggestions field and Add button on the same row so the
+        // button is visible when offered.
+        HBox suggestionsRow = new HBox(8, suggestionsField, addWordButton);
+        suggestionsRow.setAlignment(Pos.CENTER_LEFT);
+
+        // Keep last typed word accessible for the Add button
+        final String[] lastWordRef = new String[1];
+
+        addWordButton.setOnAction(evt -> {
+            String candidate = lastWordRef[0];
+            if (candidate == null || candidate.isBlank()) return;
+            Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+            confirm.setTitle("Add Word");
+            confirm.setHeaderText(null);
+            confirm.setContentText("Add \"" + candidate + "\" to the database as a user-added word?");
+            java.util.Optional<javafx.scene.control.ButtonType> resp = confirm.showAndWait();
+            if (resp.isPresent() && resp.get() == javafx.scene.control.ButtonType.OK) {
+                Word newWord = new Word(candidate, 0, 0, 0);
+                newWord.setUserAdded(true);
+                int newId = wordDao.insert(newWord);
+                if (newId != -1) {
+                    suggestionsField.setText("Added: " + candidate);
+                    addWordButton.setVisible(false);
+                } else {
+                    suggestionsField.setText("Failed to add: " + candidate);
+                }
+            }
+        });
+
+        // Auto-complete: when user types a space or comma, suggest next words
         editorArea.textProperty().addListener((obs, oldText, newText) -> {
-            if (newText.endsWith(" ")) {
-                String[] words = newText.trim().split("\\s+");
+            if (newText.endsWith(" ") || newText.endsWith(",")) {
+                String[] words = newText.trim().split("[\\s,]+");
                 if (words.length > 0) {
-                    String lastWord = words[words.length - 1].toLowerCase();
+                    String lastWord = words[words.length - 1]
+                        .replaceAll("^[^a-zA-Z0-9']+|[^a-zA-Z0-9']+$", "")
+                        .toLowerCase();
+                    if (lastWord.isBlank()) {
+                        suggestionsField.clear();
+                        addWordButton.setVisible(false);
+                        return;
+                    }
+                    lastWordRef[0] = lastWord;
                     Word dbWord = wordDao.findByWord(lastWord);
+                    StringBuilder suggestions = new StringBuilder();
+
                     if (dbWord != null) {
                         List<Transition> nextOptions = transitionDao.findByWordIdWeighted(dbWord.getWordId());
-                        StringBuilder suggestions = new StringBuilder();
-                        int limit = Math.min(5, nextOptions.size());
-                        for (int ix = 0; ix < limit; ix++) {
-                            Word nextWord = wordDao.findById(nextOptions.get(ix).getNextWordId());
-                            if (nextWord != null) {
-                                if (suggestions.length() > 0) suggestions.append(", ");
-                                suggestions.append(nextWord.getWord());
+                        if (!nextOptions.isEmpty()) {
+                            int limit = Math.min(5, nextOptions.size());
+                            for (int ix = 0; ix < limit; ix++) {
+                                Word nextWord = wordDao.findById(nextOptions.get(ix).getNextWordId());
+                                if (nextWord != null) {
+                                    if (suggestions.length() > 0) suggestions.append(", ");
+                                    suggestions.append(nextWord.getWord());
+                                }
                             }
+                        } else {
+                            // No transitions for this corpus word: fallback to top words
+                            List<Word> topWords = wordDao.getTopN(5);
+                            for (Word topWord : topWords) {
+                                if (suggestions.length() > 0) suggestions.append(", ");
+                                suggestions.append(topWord.getWord());
+                            }
+                            // word exists but has no transitions — do not offer Add
+                            addWordButton.setVisible(false);
                         }
-                        suggestionsField.setText(suggestions.toString());
+                    } else {
+                        // Word not found in corpus — treat as possible misspelling
+                        List<String> spellSuggestions = spellChecker.getSuggestions(lastWord);
+                        if (!spellSuggestions.isEmpty()) {
+                            suggestions.append("Did you mean: ");
+                            suggestions.append(String.join(", ", spellSuggestions));
+                            // Offer to add unknown word
+                            addWordButton.setVisible(true);
+                        } else {
+                            // No near matches — show top words as fallback
+                            List<Word> topWords = wordDao.getTopN(5);
+                            for (Word topWord : topWords) {
+                                if (suggestions.length() > 0) suggestions.append(", ");
+                                suggestions.append(topWord.getWord());
+                            }
+                            addWordButton.setVisible(true);
+                        }
                     }
+
+                    suggestionsField.setText(suggestions.toString());
                 }
             }
         });
@@ -211,7 +284,7 @@ public class App extends Application {
         TextField seedField = new TextField();
         seedField.setPromptText("Enter starting word...");
         ComboBox<String> algoBox = new ComboBox<>();
-        algoBox.getItems().addAll("WEIGHTED_RANDOM", "MOST_FREQUENT");
+        algoBox.getItems().addAll("WEIGHTED_RANDOM", "MOST_FREQUENT", "MOST_FREQUENT_RANDOM");
         algoBox.setValue("WEIGHTED_RANDOM");
         Button generateButton = new Button("Generate");
         genControls.getChildren().addAll(seedField, algoBox, generateButton);
@@ -220,14 +293,49 @@ public class App extends Application {
         resultLabel.setWrapText(true);
         resultLabel.setStyle("-fx-text-fill: #C71585; -fx-font-size: 14;");
 
+            Label spellCheckLabel = new Label("");
+            spellCheckLabel.setWrapText(true);
+            spellCheckLabel.setStyle("-fx-text-fill: #FF6B6B; -fx-font-size: 12;");
+
         generateButton.setOnAction(event -> {
             String seed = seedField.getText().trim();
             if (!seed.isEmpty()) {
-                String sentence = generator.generate(seed, 15, algoBox.getValue());
+                String seedLower = seed.toLowerCase();
+
+                // Check spelling
+                spellCheckLabel.setText("");
+                if (spellChecker.isMisspelled(seedLower)) {
+                    List<String> suggestions = spellChecker.getSuggestions(seedLower);
+                    if (!suggestions.isEmpty()) {
+                        spellCheckLabel.setText("⚠ Possible misspelling. Did you mean: " + String.join(", ", suggestions) + "?");
+                    } else {
+                        spellCheckLabel.setText("⚠ Word not found in corpus.");
+                    }
+                }
+
+                // If the seed word isn't present in the DB, ask the user whether
+                // to add it as a user-added word.
+                Word seedWordObj = wordDao.findByWord(seedLower);
+                if (seedWordObj == null) {
+                    Alert askAdd = new Alert(Alert.AlertType.CONFIRMATION);
+                    askAdd.setTitle("Add Word");
+                    askAdd.setHeaderText(null);
+                    askAdd.setContentText("The word \"" + seed + "\" is not in the database. Add it?");
+                    java.util.Optional<javafx.scene.control.ButtonType> resp = askAdd.showAndWait();
+                    if (resp.isPresent() && resp.get() == javafx.scene.control.ButtonType.OK) {
+                        Word newWord = new Word(seedLower, 0, 0, 0);
+                        newWord.setUserAdded(true);
+                        int newId = wordDao.insert(newWord);
+                        newWord.setWordId(newId);
+                        seedWordObj = newWord;
+                    }
+                }
+
+                String sentence = generator.generate(seedLower, 15, algoBox.getValue());
                 resultLabel.setText(sentence);
 
-                // Save to DB
-                Word seedWordObj = wordDao.findByWord(seed.toLowerCase());
+                // Save to DB (record generated sentence). If seed word was added above
+                // use its id; otherwise save null for seed id when unknown.
                 Integer seedWordId = seedWordObj != null ? seedWordObj.getWordId() : null;
                 String[] generatedWords = sentence.split("\\s+");
                 sentenceDao.insert(new GeneratedSentence(
@@ -236,7 +344,8 @@ public class App extends Application {
         });
 
         layout.getChildren().addAll(title, editorLabel, editorArea,
-            suggestionsLabel, suggestionsField, genLabel, genControls, resultLabel);
+            suggestionsLabel, suggestionsRow, genLabel, genControls, resultLabel);
+        layout.getChildren().add(spellCheckLabel);
         tab.setContent(layout);
         return tab;
     }
@@ -266,13 +375,57 @@ public class App extends Application {
         endCol.setCellValueFactory(new PropertyValueFactory<>("endCount"));
         wordTable.getColumns().addAll(wordCol, freqCol, startCol, endCol);
 
+        // Search controls for Word Statistics
+        HBox searchBox = new HBox(10);
+        searchBox.setAlignment(Pos.CENTER_LEFT);
+        TextField searchField = new TextField();
+        searchField.setPromptText("Search words...");
+        searchField.setPrefWidth(200);
+        Button searchButton = new Button("Search");
         Button refreshWords = new Button("Refresh");
-        refreshWords.setOnAction(event -> {
-            wordTable.getItems().clear();
-            wordTable.getItems().addAll(wordDao.getTopN(100));
-        });
+        ComboBox<String> sortBox = new ComboBox<>();
+        sortBox.getItems().addAll("Alphabetical", "Frequency", "Start Count", "End Count");
+        sortBox.setValue("Alphabetical");
 
-        VBox wordStatsLayout = new VBox(10, refreshWords, wordTable);
+        Runnable refreshWordTable = () -> {
+            String query = searchField.getText().trim();
+            java.util.List<Word> words = new java.util.ArrayList<>();
+            if (!query.isEmpty()) {
+                words.addAll(wordDao.findByPrefix(query, 1000));
+            } else {
+                words.addAll(wordDao.findAll());
+            }
+
+            String sortMode = sortBox.getValue();
+            if ("Frequency".equals(sortMode)) {
+                words.sort(java.util.Comparator.comparingInt(Word::getTotalCount).reversed()
+                    .thenComparing(Word::getWord));
+            } else if ("Start Count".equals(sortMode)) {
+                words.sort(java.util.Comparator.comparingInt(Word::getStartCount).reversed()
+                    .thenComparing(Word::getWord));
+            } else if ("End Count".equals(sortMode)) {
+                words.sort(java.util.Comparator.comparingInt(Word::getEndCount).reversed()
+                    .thenComparing(Word::getWord));
+            } else {
+                words.sort(java.util.Comparator.comparing(Word::getWord));
+            }
+
+            wordTable.getItems().setAll(words);
+        };
+        
+        searchButton.setOnAction(event -> refreshWordTable.run());
+        
+        refreshWords.setOnAction(event -> {
+            sortBox.setValue("Alphabetical");
+            searchField.clear();
+            refreshWordTable.run();
+        });
+        
+        sortBox.setOnAction(event -> refreshWordTable.run());
+        searchBox.getChildren().addAll(new Label("Find:"), searchField, searchButton,
+            new Label("Sort:"), sortBox, refreshWords);
+
+        VBox wordStatsLayout = new VBox(10, searchBox, wordTable);
         wordStatsLayout.setPadding(new Insets(10));
         wordStatsTab.setContent(wordStatsLayout);
 
@@ -298,7 +451,26 @@ public class App extends Application {
         historyLayout.setPadding(new Insets(10));
         historyTab.setContent(historyLayout);
 
-        innerTabs.getTabs().addAll(wordStatsTab, historyTab);
+        // Duplicate sentence report
+        Tab duplicateTab = new Tab("Duplicates");
+        TableView<SentenceDuplicate> duplicateTable = new TableView<>();
+        duplicateTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        TableColumn<SentenceDuplicate, String> duplicateSentenceCol = new TableColumn<>("Sentence");
+        duplicateSentenceCol.setCellValueFactory(new PropertyValueFactory<>("sentenceText"));
+        TableColumn<SentenceDuplicate, Integer> duplicateCountCol = new TableColumn<>("Occurrences");
+        duplicateCountCol.setCellValueFactory(new PropertyValueFactory<>("duplicateCount"));
+        duplicateTable.getColumns().addAll(duplicateSentenceCol, duplicateCountCol);
+
+        Button refreshDuplicates = new Button("Refresh");
+        refreshDuplicates.setOnAction(event -> {
+            duplicateTable.getItems().setAll(sentenceDao.findDuplicates());
+        });
+
+        VBox duplicateLayout = new VBox(10, refreshDuplicates, duplicateTable);
+        duplicateLayout.setPadding(new Insets(10));
+        duplicateTab.setContent(duplicateLayout);
+
+        innerTabs.getTabs().addAll(wordStatsTab, historyTab, duplicateTab);
         layout.getChildren().addAll(title, innerTabs);
         tab.setContent(layout);
         return tab;
@@ -314,15 +486,43 @@ public class App extends Application {
         Label listLabel = new Label("Word List");
         listLabel.setStyle("-fx-font-weight: bold;");
         ListView<String> wordListView = new ListView<>();
+        
+        // Search controls for Admin word list
+        HBox adminSearchBox = new HBox(10);
+        adminSearchBox.setAlignment(Pos.CENTER_LEFT);
+        TextField adminSearchField = new TextField();
+        adminSearchField.setPromptText("Search words...");
+        adminSearchField.setPrefWidth(150);
+        Button adminSearchButton = new Button("Search");
         Button refreshList = new Button("Refresh");
+        
+        adminSearchButton.setOnAction(event -> {
+            String query = adminSearchField.getText().trim();
+            wordListView.getItems().clear();
+            if (!query.isEmpty()) {
+                List<Word> results = wordDao.findByPrefix(query, 200);
+                for (Word wordItem : results) {
+                    wordListView.getItems().add(wordItem.getWord());
+                }
+            } else {
+                List<Word> allWords = wordDao.findAll();
+                for (Word wordItem : allWords) {
+                    wordListView.getItems().add(wordItem.getWord());
+                }
+            }
+        });
+        
         refreshList.setOnAction(event -> {
             wordListView.getItems().clear();
             List<Word> allWords = wordDao.findAll();
             for (Word wordItem : allWords) {
                 wordListView.getItems().add(wordItem.getWord());
             }
+            adminSearchField.clear();
         });
-        leftPane.getChildren().addAll(listLabel, refreshList, wordListView);
+        
+        adminSearchBox.getChildren().addAll(adminSearchButton, adminSearchField, refreshList);
+        leftPane.getChildren().addAll(listLabel, adminSearchBox, wordListView);
 
         // Edit form on right
         VBox rightPane = new VBox(10);

@@ -2,12 +2,13 @@
  * SentenceGenerator.java
  *
  * Author: James Human
- * Revised Date: 3/30/2026
+ * Revised by: Murtaza Khan (refactoring and feature additions)
+ * Revised Date: 4/29/2026
  * Course: CS4485, Senior Design Project
  * This was made with the help of generative AI (Claude Code)
  *
  * Generates sentences using word transition data from the database.
- * Supports two algorithms: WEIGHTED_RANDOM and MOST_FREQUENT.
+ * Supports three algorithms: WEIGHTED_RANDOM, MOST_FREQUENT, and MOST_FREQUENT_RANDOM.
  ******************************************************************************/
 package sentencebuilder.algorithms;
 
@@ -35,7 +36,7 @@ public class SentenceGenerator {
      *
      * @param seedWord  the word to start the sentence with
      * @param maxLength maximum number of words in the sentence
-     * @param algorithm "WEIGHTED_RANDOM" or "MOST_FREQUENT"
+     * @param algorithm "WEIGHTED_RANDOM", "MOST_FREQUENT", or "MOST_FREQUENT_RANDOM"
      * @return the generated sentence, or an error message
      **************************************************************************/
     public String generate(String seedWord, int maxLength, String algorithm) {
@@ -49,37 +50,50 @@ public class SentenceGenerator {
 
         for (int step = 1; step < maxLength; step++) {
             List<Transition> nextTransitions;
-            if ("MOST_FREQUENT".equals(algorithm)) {
+            if ("MOST_FREQUENT".equals(algorithm) || "MOST_FREQUENT_RANDOM".equals(algorithm)) {
                 nextTransitions = transitionDao.findByWordIdWeighted(currentWordId);
             } else {
                 nextTransitions = transitionDao.findByWordId(currentWordId);
             }
 
-            if (nextTransitions.isEmpty()) break;
+            Transition chosen = null;
+            Word nextWord = null;
 
-            Transition chosen;
-            if ("MOST_FREQUENT".equals(algorithm)) {
-                // Always pick the most frequent next word
-                chosen = nextTransitions.get(0);
-            } else {
-                // Weighted random selection
-                int totalWeight = 0;
-                for (Transition transition : nextTransitions) {
-                    totalWeight += transition.getCount();
-                }
-                int randomValue = random.nextInt(totalWeight);
-                int cumulative = 0;
-                chosen = nextTransitions.get(0);
-                for (Transition transition : nextTransitions) {
-                    cumulative += transition.getCount();
-                    if (randomValue < cumulative) {
-                        chosen = transition;
-                        break;
+            if (!nextTransitions.isEmpty()) {
+                if ("MOST_FREQUENT".equals(algorithm)) {
+                    // Always pick the most frequent next word
+                    chosen = nextTransitions.get(0);
+                } else if ("MOST_FREQUENT_RANDOM".equals(algorithm)) {
+                    // Randomly pick from the top 5 most frequent transitions
+                    int topN = Math.min(5, nextTransitions.size());
+                    chosen = nextTransitions.get(random.nextInt(topN));
+                } else {
+                    // Weighted random selection
+                    int totalWeight = 0;
+                    for (Transition transition : nextTransitions) {
+                        totalWeight += transition.getCount();
                     }
+                    int randomValue = random.nextInt(totalWeight);
+                    int cumulative = 0;
+                    chosen = nextTransitions.get(0);
+                    for (Transition transition : nextTransitions) {
+                        cumulative += transition.getCount();
+                        if (randomValue < cumulative) {
+                            chosen = transition;
+                            break;
+                        }
+                    }
+                }
+                nextWord = wordDao.findById(chosen.getNextWordId());
+            } else {
+                // No transitions found (e.g., user-added word with no corpus data)
+                // Pick a random word from top frequent words to continue the sentence
+                List<Word> topWords = wordDao.getTopN(20);
+                if (!topWords.isEmpty()) {
+                    nextWord = topWords.get(random.nextInt(topWords.size()));
                 }
             }
 
-            Word nextWord = wordDao.findById(chosen.getNextWordId());
             if (nextWord == null) break;
 
             sentence.append(" ").append(nextWord.getWord());

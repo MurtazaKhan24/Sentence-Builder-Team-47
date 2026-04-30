@@ -2,8 +2,8 @@
  * TextParser.java
  *
  * Author: Murtaza Khan
- * Revised by: James Human (converted from Python to Java)
- * Revised Date: 3/30/2026
+ * Revised by: James Human (converted from Python to Java), Murtaza Khan (refactoring and feature additions)
+ * Revised Dates: 3/30/2026, 4/29/2026
  * Course: CS4485, Senior Design Project
  * This was made with the help of generative AI (Claude Code)
  *
